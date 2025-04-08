@@ -1,15 +1,7 @@
 import { chromium } from "playwright";
+import cleanRedirectUrl from "../utils/cleanUrl.js";
 
 export async function scrapeWatchPageWithPlaywright(url) {
-  // 🔄 Manejar redirecciones
-  if (url.includes("redirect.php?id=")) {
-    const redirectMatch = url.match(/redirect\.php\?id=(.+)/);
-    if (redirectMatch && redirectMatch[1]) {
-      url = decodeURIComponent(redirectMatch[1]);
-      console.log("🔄 URL redireccionada limpiada:", url);
-    }
-  }
-
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent:
@@ -20,6 +12,31 @@ export async function scrapeWatchPageWithPlaywright(url) {
   // 🔧 Definilo acá para que esté accesible en el catch
   let iframeSrc = null;
   let videoSrc = null;
+
+  // 🔁 Extraer iframe desde monoschino2.com/ver/... dentro de Playwright
+  if (url.includes("monoschino2.com/ver/")) {
+    console.log("🌐 Navegando a página monoschino:", url);
+    await page.goto(url, { timeout: 20000 });
+
+    try {
+      iframeSrc = await page.$eval(".iframe-container iframe", (el) => el.src);
+      console.log("🔍 Iframe extraído desde Monoschino:", iframeSrc);
+
+      if (iframeSrc.includes("redirect.php?id=")) {
+        const redirectMatch = iframeSrc.match(/redirect\.php\?id=(.+)/);
+        if (redirectMatch && redirectMatch[1]) {
+          url = decodeURIComponent(redirectMatch[1]);
+          console.log("🔄 URL redireccionada limpiada:", url);
+        }
+      }
+    } catch (e) {
+      console.error(
+        "⚠️ No se pudo extraer iframe desde Monoschino:",
+        e.message
+      );
+      throw e;
+    }
+  }
 
   try {
     console.log("🌐 Navegando a la página final:", url);
@@ -39,9 +56,11 @@ export async function scrapeWatchPageWithPlaywright(url) {
       timeout: 20000,
     });
     iframeSrc = await iframeElement.getAttribute("src");
+    const iframeRaw = iframeSrc;
+    const iframeClean = cleanRedirectUrl(iframeSrc);
 
     if (!iframeSrc) throw new Error("⚠️ No se pudo obtener el src del iframe.");
-    console.log("🔗 Redirigiendo al iframe embed:", iframeSrc);
+    console.log("🔗 Redirigiendo al iframe embed:", iframeClean);
 
     const iframePage = await context.newPage();
     iframePage.on("response", (response) => {
@@ -72,7 +91,13 @@ export async function scrapeWatchPageWithPlaywright(url) {
 
     if (videoSrc) {
       console.log("✅ Video encontrado en requests de red:", videoSrc);
-      return { videoUrl: videoSrc, iframe: iframeSrc };
+      return {
+        videoUrl: videoSrc,
+        iframe: {
+          raw: iframeRaw,
+          clean: iframeClean,
+        },
+      };
     }
 
     videoSrc = await iframePage.evaluate(() => {
@@ -108,7 +133,10 @@ export async function scrapeWatchPageWithPlaywright(url) {
 
     return {
       videoUrl: videoSrc,
-      iframe: iframeSrc,
+      iframe: {
+        raw: iframeRaw,
+        clean: iframeClean,
+      },
     };
   } catch (error) {
     console.error("❌ Error scraping video con Playwright:", error);
@@ -119,7 +147,10 @@ export async function scrapeWatchPageWithPlaywright(url) {
     // 🔁 Asegurate de devolver el iframe incluso en errores
     return {
       videoUrl: null,
-      iframe: iframeSrc,
+      iframe: {
+        raw: iframeRaw,
+        clean: iframeClean,
+      },
     };
   } finally {
     await browser.close();
