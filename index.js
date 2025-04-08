@@ -3,7 +3,6 @@ import dotenv from "dotenv";
 import watchRoute from "./src/routes/watch.js";
 import cors from "cors";
 
-
 dotenv.config();
 
 const app = express();
