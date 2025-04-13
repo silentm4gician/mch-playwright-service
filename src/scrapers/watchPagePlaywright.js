@@ -52,11 +52,11 @@ export async function scrapeWatchPageWithPlaywright(url) {
 
   try {
     urlFetch = url;
-    if (urlFetch.includes("fembed.com"))
+    if (!urlFetch.includes("ironhentai.com"))
       return {
-        videoUrl: allIframes[1],
-        videoUrl2: allIframes[2],
+        videoUrl: allIframes.find((url) => url.includes("mega.nz")) || null,
         serverName: "Mega",
+        allIframes: allIframes,
       };
     console.log("🌐 Navegando a la página final:", urlFetch);
     await page.goto(urlFetch, { timeout: 30000, waitUntil: "networkidle" });
