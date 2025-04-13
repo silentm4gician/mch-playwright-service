@@ -40,7 +40,7 @@ export async function findValidIframe(page) {
 
     // Prioridad de servidores
     const priority = [
-      { name: "Iro", keyword: "re.ironhentai.com" },
+      { name: "Iron", keyword: "re.ironhentai.com" },
       { name: "Mega", keyword: "mega.nz" },
       { name: "YourUpload", keyword: "yourupload.com" },
       { name: "Okru", keyword: "ok.ru" },
