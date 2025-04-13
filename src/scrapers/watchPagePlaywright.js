@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import cleanRedirectUrl from "../utils/cleanUrl.js";
+import { findValidIframe } from "../utils/findValidIframe.js";
 
 export async function scrapeWatchPageWithPlaywright(url) {
   const browser = await chromium.launch({ headless: true });
@@ -15,10 +16,20 @@ export async function scrapeWatchPageWithPlaywright(url) {
   let videoSrc = null;
   let urlFetch = null;
 
+  let serverName = null;
+  let allIframes = [];
+
   // 🔁 Extraer iframe desde monoschino2.com/ver/... dentro de Playwright
   if (url.includes("monoschino2.com/ver/")) {
     console.log("🌐 Navegando a página monoschino:", url);
     await page.goto(url, { timeout: 20000 });
+    const altIframes = await findValidIframe(page);
+    if (altIframes) {
+      iframeSrc = altIframes.iframe;
+      serverName = altIframes.serverName;
+      allIframes = altIframes.all;
+      console.log(`✅ Encontrado iframe de ${serverName}:`, iframeSrc);
+    }
 
     try {
       iframeSrc = await page.$eval(".iframe-container iframe", (el) => el.src);
@@ -41,6 +52,12 @@ export async function scrapeWatchPageWithPlaywright(url) {
 
   try {
     urlFetch = url;
+    if (urlFetch.includes("fembed.com"))
+      return {
+        videoUrl: allIframes[1],
+        videoUrl2: allIframes[2],
+        serverName: "Mega",
+      };
     console.log("🌐 Navegando a la página final:", urlFetch);
     await page.goto(urlFetch, { timeout: 30000, waitUntil: "networkidle" });
 
@@ -135,6 +152,8 @@ export async function scrapeWatchPageWithPlaywright(url) {
         clean: iframeClean,
       },
       urlFetch: urlFetch,
+      serverName: serverName,
+      allIframes: allIframes,
     };
   } catch (error) {
     console.error("❌ Error scraping video con Playwright:", error.message);
@@ -149,6 +168,8 @@ export async function scrapeWatchPageWithPlaywright(url) {
         clean: iframeClean || null,
       },
       urlFetch: urlFetch || null,
+      serverName: serverName || null,
+      allIframes: allIframes || null,
     };
   } finally {
     await browser.close();
