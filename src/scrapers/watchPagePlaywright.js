@@ -2,6 +2,61 @@ import { chromium } from "playwright";
 import cleanRedirectUrl from "../utils/cleanUrl.js";
 import { findValidIframe } from "../utils/findValidIframe.js";
 
+// 🧠 Función auxiliar para detectar URLs de video
+async function findVideoInPage(page) {
+  let videoUrl = null;
+
+  page.on("response", (response) => {
+    const url = response.url();
+    if ((url.includes(".mp4") || url.includes(".m3u8")) && !videoUrl) {
+      console.log("⚡ Intercepted video in response:", url);
+      videoUrl = url;
+    }
+  });
+
+  const checkDOM = async (frame) => {
+    return frame.evaluate(() => {
+      const video = document.querySelector("video");
+      if (video?.src) return video.src;
+
+      const source = video?.querySelector("source");
+      if (source?.src) return source.src;
+
+      if (window.jwplayer) {
+        try {
+          const player = jwplayer();
+          const file = player?.getPlaylist?.()[0]?.file;
+          if (file) return file;
+        } catch (e) {}
+      }
+
+      const scripts = Array.from(document.querySelectorAll("script"));
+      for (const script of scripts) {
+        const content = script.textContent || "";
+        const mp4Match = content.match(/https?:\/\/[^"' ]+\.mp4[^"' ]*/);
+        const m3u8Match = content.match(/https?:\/\/[^"' ]+\.m3u8[^"' ]*/);
+        if (mp4Match) return mp4Match[0];
+        if (m3u8Match) return m3u8Match[0];
+      }
+
+      return null;
+    });
+  };
+
+  const allFrames = page.frames();
+  for (const frame of allFrames) {
+    const domVideo = await checkDOM(frame);
+    if (domVideo) {
+      console.log("🎯 Video encontrado en DOM de frame:", domVideo);
+      return domVideo;
+    }
+  }
+
+  await page.waitForTimeout(3000);
+  return videoUrl;
+}
+
+// 🎬 Scraper principal
 export async function scrapeWatchPageWithPlaywright(url) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -19,10 +74,10 @@ export async function scrapeWatchPageWithPlaywright(url) {
   let serverName = null;
   let allIframes = [];
 
-  // 🔁 Extraer iframe desde monoschino2.com/ver/... dentro de Playwright
   if (url.includes("monoschino2.com/ver/")) {
     console.log("🌐 Navegando a página monoschino:", url);
     await page.goto(url, { timeout: 20000 });
+
     const altIframes = await findValidIframe(page);
     if (altIframes) {
       iframeSrc = altIframes.iframe;
@@ -52,29 +107,24 @@ export async function scrapeWatchPageWithPlaywright(url) {
 
   try {
     urlFetch = url;
-    if (!urlFetch.includes("ironhentai.com"))
+
+    if (!urlFetch.includes("ironhentai.com")) {
       return {
         videoUrl: allIframes.find((url) => url.includes("mega.nz")) || null,
         serverName: "Mega",
         allIframes: allIframes,
       };
-    console.log("🌐 Navegando a la página final:", urlFetch);
-    await page.goto(urlFetch, { timeout: 30000, waitUntil: "networkidle" });
+    }
 
-    // Monitor network requests
-    page.on("response", (response) => {
-      const url = response.url();
-      if ((url.includes(".mp4") || url.includes(".m3u8")) && !videoSrc) {
-        console.log("⚡ Intercepted video URL in response:", url);
-        videoSrc = url;
-      }
+    console.log("🌐 Navegando a la página final:", urlFetch);
+    await page.goto(urlFetch, {
+      timeout: 50000,
+      waitUntil: "domcontentloaded",
     });
 
-    console.log("🕒 Esperando iframe generado por JS...");
     const iframeElement = await page.waitForSelector("iframe", {
       timeout: 20000,
     });
-
     iframeSrc = await iframeElement.getAttribute("src");
     iframeRaw = iframeSrc;
     iframeClean = cleanRedirectUrl(iframeSrc);
@@ -83,64 +133,13 @@ export async function scrapeWatchPageWithPlaywright(url) {
     console.log("🔗 Redirigiendo al iframe embed:", iframeClean);
 
     const iframePage = await context.newPage();
-    iframePage.on("response", (response) => {
-      const url = response.url();
-      if ((url.includes(".mp4") || url.includes(".m3u8")) && !videoSrc) {
-        console.log("⚡ Intercepted video URL in iframe response:", url);
-        videoSrc = url;
-      }
-    });
-
     await iframePage.goto(iframeSrc, {
       timeout: 30000,
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
 
-    console.log("🎥 Esperando <video> o <source>...");
-    await iframePage.waitForSelector("video, video > source", {
-      timeout: 20000,
-    });
-
-    try {
-      await iframePage.click(
-        ".jwplayer, .jw-display-icon-container, .play-button",
-        { timeout: 3000 }
-      );
-      await iframePage.waitForTimeout(2000);
-    } catch (e) {}
-
-    if (videoSrc) {
-      console.log("✅ Video encontrado en requests de red:", videoSrc);
-    } else {
-      // Fallback a DOM o scripts
-      videoSrc = await iframePage.evaluate(() => {
-        const video = document.querySelector("video");
-        if (video?.src) return video.src;
-        const source = video?.querySelector("source");
-        if (source?.src) return source.src;
-
-        if (window.jwplayer) {
-          try {
-            const player = jwplayer();
-            if (player && player.getPlaylist && player.getPlaylist()[0]) {
-              return player.getPlaylist()[0].file;
-            }
-          } catch (e) {}
-        }
-
-        const scripts = document.querySelectorAll("script");
-        for (const script of scripts) {
-          const content = script.textContent || "";
-          let match = content.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/);
-          if (!match) {
-            match = content.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
-          }
-          if (match) return match[1];
-        }
-
-        return null;
-      });
-    }
+    console.log("🎥 Buscando video en todos los frames y scripts...");
+    videoSrc = await findVideoInPage(iframePage);
 
     if (!videoSrc) throw new Error("❌ No se encontró el video src.");
     console.log("✅ Video encontrado:", videoSrc);
